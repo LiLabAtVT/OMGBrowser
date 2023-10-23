@@ -144,7 +144,7 @@ new_heatmap_server <- function(input, output, session) {
     ) +
     scale_fill_viridis_c() +
     theme_minimal() +
-    labs(fill = "Value", x = "Upload Query Data", y = "Select Reference Data")
+    labs(fill = "Value", x = "Select Reference Data", y = "Upload Query Data")
 
   updateSelectInput(session, "species2", choices = species_names)
 
