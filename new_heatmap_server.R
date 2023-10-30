@@ -2,6 +2,10 @@ library(shiny)
 library(tidyverse)
 library(reshape2)
 library(openxlsx)
+library(shinyHeatmaply)
+library(plotly)
+library(RColorBrewer)
+library(DT)
 
 # Function to clean gene names in orthogroups dataset to match species dataset
 clean_orthogroups_gene_names <- function(orthogroups, species_name, species_genes) {
@@ -45,6 +49,19 @@ clean_orthogroups_gene_names <- function(orthogroups, species_name, species_gene
 }
 
 calculate_overlaps <- function(Species1, Species2, uploaded_species_name, ref_species_name) {
+  Species1 <- Species1 %>%
+    group_by(clusterName) %>%
+    arrange(desc(avg_log2FC)) %>%
+    slice_head(n = 200) %>%
+    ungroup()
+
+  # Filter top 200 OMGs based on avglog2FC within each cluster for Species2
+  Species2 <- Species2 %>%
+    group_by(clusterName) %>%
+    arrange(desc(avg_log2FC)) %>%
+    slice_head(n = 200) %>%
+    ungroup()
+
   clusters_S1 <- unique(Species1$clusterName)
   clusters_S2 <- unique(Species2$clusterName)
 
@@ -102,25 +119,52 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   # Calculate overlaps and get additional information
   overlaps <- calculate_overlaps(species1_data, species2_data, species1_name, species2_name)
 
-  # Create a heatmap
-  heatmap <- ggplot(overlaps, aes(
-    y = reorder(as.factor(.data[[paste0(species1_name, "_cluster - Query Cluster")]]), -common_OMGs),
-    x = reorder(as.factor(.data[[paste0(species2_name, "_cluster - Ref Cluster")]]), -common_OMGs),
-    fill = common_OMGs
-  )) +
-    geom_tile(color = "white") +
-    scale_fill_gradient(low = "white", high = "darkgreen") +
-    geom_text(aes(label = sprintf("%.0f", common_OMGs)), color = "black", size = 4) +
-    theme_minimal() +
-    theme(
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, size = 10),
-      axis.text.y = element_text(angle = 0, size = 10)
-    ) +
-    labs(fill = "Common OMGs", y = paste(species1_name, "- Query Data"), x = paste(species2_name, "- Reference Data"))
+  # Identify columns
+  all_columns <- colnames(overlaps)
+  cluster_columns <- all_columns[!all_columns %in% c("common_OMGs")]
+
+  query_col_name <- cluster_columns[1]
+  ref_col_name <- cluster_columns[3]
+
+  # Pivot to matrix format
+  overlaps_matrix <- dcast(overlaps,
+    overlaps[[query_col_name]] ~ overlaps[[ref_col_name]],
+    value.var = "common_OMGs",
+    fill = 0
+  )
+
+  # Ordering rows consistently
+  overlaps_matrix <- overlaps_matrix[order(overlaps_matrix[[1]]), ]
+
+  # Remove row names for heatmaply
+  rownames(overlaps_matrix) <- overlaps_matrix[[1]]
+  overlaps_matrix <- overlaps_matrix[, -1]
+
+  custom_hover <- function(mat, x, y, z) {
+    paste0(
+      "Query Cluster: ", x, "<br>",
+      "Reference Cluster: ", y, "<br>",
+      "Common OMGs: ", z
+    )
+  }
+
+  heatmap <- heatmaply(overlaps_matrix,
+    showticklabels = c(TRUE, TRUE),
+    show_row_dendrogram = FALSE,
+    show_col_dendrogram = FALSE,
+    cellnote = overlaps_matrix,
+    main = " ",
+    xlab = paste0(species2_name, " - Reference Cluster"),
+    ylab = paste0(species1_name, " - Query Cluster"),
+    colors = colorRampPalette(brewer.pal(9, "Greens"))(256),
+    custom_hoverinfo = custom_hover,
+    dendrogram = "none"
+  )
 
   list(
     heatmap = heatmap,
     overlaps = overlaps,
+    overlaps_matrix = overlaps_matrix,
     species1_data = species1_data,
     species2_data = species2_data
   )
@@ -155,8 +199,8 @@ new_heatmap_server <- function(input, output, session) {
     }
 
     # Extract the species names
-    uploaded_species_name <- sub("(__.*|_[0-9]+)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
-    selected_species2_name <- sub("(__.*|_[0-9]+)$", "", input$species2)
+    uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
+    selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
 
     # Read the data files
     species1_data <- read.csv(input$file1$datapath)
@@ -170,16 +214,47 @@ new_heatmap_server <- function(input, output, session) {
   values <- reactiveValues(
     processed_data = NULL,
     comparison_table = NULL,
-    common_genes_data = NULL
+    common_genes_data = NULL,
+    first_page = NULL
   )
 
   observe({
-    values$processed_data <- req(process_data())
+    processed_data <- req(process_data())
+    values$processed_data <- processed_data
   })
 
-  output$new_heatmap_plot <- renderPlot({
+  output$new_heatmap_plot <- renderPlotly({
     req(values$processed_data)
-    values$processed_data$heatmap
+    p <- values$processed_data$heatmap
+
+    # Assign a source to the plot
+    p$x$source <- "newHeatmapSource"
+
+    return(p)
+  })
+
+  observe({
+    clicked_info <- event_data(event = "plotly_click", source = "newHeatmapSource")
+
+    if (!is.null(clicked_info)) {
+      # Extract the x and y positions
+      x_index <- clicked_info$x
+      y_index <- clicked_info$y
+
+      # Extract cluster names using indices
+      query_cluster <- rownames(values$processed_data$overlaps_matrix)[length(rownames(values$processed_data$overlaps_matrix)) - y_index + 1]
+      ref_cluster <- colnames(values$processed_data$overlaps_matrix)[x_index] # No need to exclude the first column since it's matrix
+
+      species1_data <- req(values$processed_data$species1_data)
+      species2_data <- req(values$processed_data$species2_data)
+
+      first_page <- populate_new_table(query_cluster, ref_cluster, species1_data, species2_data)
+      values$first_page <- first_page
+
+      output$hovered_info_table <- renderDT({
+        datatable(values$first_page, caption = "Cell Data")
+      })
+    }
   })
 
   # Adjust the comparison table rendering to use the overlaps data from processed_data
@@ -244,7 +319,7 @@ new_heatmap_server <- function(input, output, session) {
     species1_data <- req(values$processed_data$species1_data)
     species2_data <- req(values$processed_data$species2_data)
 
-    common_genes_data <- populate_new_table(selected_row, species1_data, species2_data)
+    common_genes_data <- populate_new_table(as.character(selected_row[1]), as.character(selected_row[3]), species1_data, species2_data)
     values$common_genes_data <- common_genes_data
 
     output$new_table <- DT::renderDataTable({
@@ -264,10 +339,10 @@ new_heatmap_server <- function(input, output, session) {
     }
   )
 
-  populate_new_table <- function(selected_row, Species1, Species2) {
+  populate_new_table <- function(uploaded_species_cluster, ref_cluster, Species1, Species2) {
     # Extract the selected row's information
-    uploaded_species_cluster <- as.character(selected_row[1])
-    ref_cluster <- as.character(selected_row[3])
+    # uploaded_species_cluster <- as.character(selected_row[1])
+    # ref_cluster <- as.character(selected_row[3])
 
     # Filter the data from Species1 and Species2 based on the selected clusters
     species1_data <- Species1[as.character(Species1$cluster) == uploaded_species_cluster, ]
@@ -301,16 +376,16 @@ new_heatmap_server <- function(input, output, session) {
   }
 
   output$downloadButtons <- renderUI({
-      # Get a list of files in the sample_data folder
-      files <- list.files(path = "sample_data", full.names = FALSE)
-      
-      # Create a download button for each file
-      buttons <- lapply(files, function(file) {
-        downloadButton(paste0("download_", gsub("\\.", "_", file)), file)
-      })
-      
-      do.call(tagList, buttons)
+    # Get a list of files in the sample_data folder
+    files <- list.files(path = "sample_data", full.names = FALSE)
+
+    # Create a download button for each file
+    buttons <- lapply(files, function(file) {
+      downloadButton(paste0("download_", gsub("\\.", "_", file)), file)
     })
+
+    do.call(tagList, buttons)
+  })
 
   # Create a download handler for each file in the sample_data folder
   observe({
@@ -329,5 +404,4 @@ new_heatmap_server <- function(input, output, session) {
       )
     })
   })
-  
 }
