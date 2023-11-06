@@ -6,6 +6,8 @@ library(shinyHeatmaply)
 library(plotly)
 library(RColorBrewer)
 library(DT)
+library(shinyalert)
+
 
 # Function to clean gene names in orthogroups dataset to match species dataset
 clean_orthogroups_gene_names <- function(orthogroups, species_name, species_genes) {
@@ -40,6 +42,10 @@ clean_orthogroups_gene_names <- function(orthogroups, species_name, species_gene
   if (species_name == "MtrunA17r5") {
     orthogroups <- orthogroups %>%
       mutate(!!species_name := gsub("_", "", !!sym(species_name)))
+  }
+  if (species_name == "Oryza") {
+    orthogroups <- orthogroups %>%
+      mutate(!!species_name := gsub("t(\\d+)-.*$", "g\\1", !!sym(species_name)))
   }
 
   orthogroups <- orthogroups %>%
@@ -108,13 +114,39 @@ calculate_overlaps <- function(Species1, Species2, uploaded_species_name, ref_sp
 }
 
 create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroups, species1_name, species2_name) {
-  # Clean orthogroups gene names for each species
-  orthogroups_species1 <- clean_orthogroups_gene_names(orthogroups, species1_name, species1_data$gene)
-  orthogroups_species2 <- clean_orthogroups_gene_names(orthogroups, species2_name, species2_data$gene)
+  # Attempt to merge and catch any errors
+  tryCatch(
+    {
+      # Clean orthogroups gene names for each species
+      orthogroups_species1 <- clean_orthogroups_gene_names(orthogroups, species1_name, species1_data$gene)
+      orthogroups_species2 <- clean_orthogroups_gene_names(orthogroups, species2_name, species2_data$gene)
 
-  # Merge with orthogroups
-  species1_data <- merge(species1_data, orthogroups_species1, by.x = "gene", by.y = species1_name)
-  species2_data <- merge(species2_data, orthogroups_species2, by.x = "gene", by.y = species2_name)
+      # Merge with orthogroups
+      species1_data <- merge(species1_data, orthogroups_species1, by.x = "gene", by.y = species1_name)
+      species2_data <- merge(species2_data, orthogroups_species2, by.x = "gene", by.y = species2_name)
+    },
+    error = function(e) {
+      # If there's an error, show an alert
+      shinyalert::shinyalert(
+        title = "Error, Please Refresh the page",
+        text = "1. Make sure your CSV file name follows the same name from the reference dropdown and use the same species name from it. 2. Please make sure your uploaded data has the same columns as: gene, clusterName, avg_log2FC",
+        type = "error"
+      )
+      return(NULL)
+    }
+  )
+
+  # After merging, check if the resulting dataframe is empty
+  if (nrow(species1_data) == 0) {
+    shinyalert::shinyalert(
+      title = "Data Merge Error",
+      text = "1. Make sure your CSV file name follows the same name from the reference dropdown and use the same species name from it. 2. Please make sure your uploaded data has the same columns as: gene, clusterName, avg_log2FC",
+      type = "error"
+    )
+
+    # Return from function early since there's an error
+    return(NULL)
+  }
 
   # Calculate overlaps and get additional information
   overlaps <- calculate_overlaps(species1_data, species2_data, species1_name, species2_name)
@@ -177,6 +209,8 @@ new_heatmap_server <- function(input, output, session) {
   species_files <- list.files(species_data_path)
   species_names <- gsub("\\.csv$", "", species_files)
 
+  updateSelectInput(session, "species2", choices = species_names)
+
   placeholder_heatmap <- ggplot() +
     geom_tile(
       data = data.frame(
@@ -189,8 +223,6 @@ new_heatmap_server <- function(input, output, session) {
     scale_fill_viridis_c() +
     theme_minimal() +
     labs(fill = "Value", x = "Select Reference Data", y = "Upload Query Data")
-
-  updateSelectInput(session, "species2", choices = species_names)
 
   process_data <- function() {
     # Ensure the uploaded file and selected species are available
@@ -257,9 +289,28 @@ new_heatmap_server <- function(input, output, session) {
     }
   })
 
+  output$download_info_table <- downloadHandler(
+    filename = function() {
+      paste("comparison_table-", Sys.Date(), ".xlsx", sep = "")
+    },
+    content = function(file) {
+      # Capture the filtered data
+      data_to_download <- values$first_page # Ensure this is the full dataset you want to download
+      write.xlsx(data_to_download, file, row.names = FALSE)
+    }
+  )
+
   # Adjust the comparison table rendering to use the overlaps data from processed_data
   output$comparison_table <- renderDT({
     req(values$processed_data)
+
+    # Assuming 'values$processed_data$overlaps' is your data frame and columns at index 1 and 3 need to be converted to character
+
+    values$processed_data$overlaps[, 1] <- as.character(values$processed_data$overlaps[, 1])
+    values$processed_data$overlaps[, 3] <- as.character(values$processed_data$overlaps[, 3])
+
+    # Now your columns are explicitly character strings, which should prevent the DataTables error
+
 
     # Render the table
     datatable(
@@ -283,20 +334,14 @@ new_heatmap_server <- function(input, output, session) {
           "$('#customFilters').empty();",
 
           # Add search boxes to the new div with some margins
-          "$('<input type=\"text\" placeholder=\"Query Cluster\" id=\"col1-filter\" style=\"margin-right: 10px;\">').appendTo('#customFilters').on('keyup', function() {",
-          "var table = settings.oInstance.api();",
-          "table.columns(0).search(this.value).draw();",
+          "$('<input type=\"text\" placeholder=\"Query Cluster\" id=\"col0-filter\" style=\"margin-right: 10px;\">').appendTo('#customFilters').on('keyup', function() {",
+          "var table0 = settings.oInstance.api();",
+          "table0.columns(0).search(this.value.toString()).draw();",
           "});",
           "$('<input type=\"text\" placeholder=\"Reference Cluster\" id=\"col3-filter\" style=\"margin-right: 10px;\">').appendTo('#customFilters').on('keyup', function() {",
           "var table = settings.oInstance.api();",
           "table.columns(2).search(this.value).draw();",
           "});",
-
-          # Move the download button to the customFilters div and align it to the right
-          # If the download button is not already in the customFilters div, move it there
-          # "if($('#customFilters').has('#download_button').length === 0) {",
-          # "$('#download_button').appendTo('#customFilters').css({'float': 'right'});",
-          # "}",
           "}"
         )
       )
@@ -403,5 +448,42 @@ new_heatmap_server <- function(input, output, session) {
         }
       )
     })
+  })
+
+  # List of filenames under Dataset A and Dataset B
+  dataset_A_files <- c("Brassica_rapa_1(Leaf).csv", "species2_A.csv") # Add all filenames for Dataset A
+  dataset_B_files <- c("Catharanthus_roseus_1(Leaf).csv", "species4_B.csv") # Add all filenames for Dataset B
+
+  # Function to check the dataset for a given species file
+  get_dataset_info <- function(species_file) {
+    if (species_file %in% dataset_A_files) {
+      dataset <- "Dataset A"
+      url <- "http://link_to_dataset_A.com"
+    } else if (species_file %in% dataset_B_files) {
+      dataset <- "Dataset B"
+      url <- "http://link_to_dataset_B.com"
+    } else {
+      dataset <- NULL
+      url <- NULL
+    }
+
+    list(dataset = dataset, url = url)
+  }
+
+  # Inside server function
+  # Server
+  output$dataset_info <- renderText({
+    req(input$species2)
+    species_file <- paste0(input$species2, ".csv")
+    dataset_info <- get_dataset_info(species_file)
+
+    if (!is.null(dataset_info$dataset)) {
+      paste(
+        "Source:", dataset_info$dataset,
+        "Reference Database:", dataset_info$url
+      )
+    } else {
+      "source not found for the selected species."
+    }
   })
 }

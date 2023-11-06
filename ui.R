@@ -116,7 +116,8 @@ ui <- fluidPage(
             )
           ),
           selectInput("species2", "Select Reference Species(Tissue)", ""),
-          verbatimTextOutput("new_matched_genes")
+          tags$strong("Dataset Reference:"), # This is the label for the dataset reference
+          textOutput("dataset_info") # New UI element for dataset info
         ),
         mainPanel(
           tabsetPanel(
@@ -129,9 +130,12 @@ ui <- fluidPage(
               br(),
               h3("Upload and Select a cell to know more"),
               DTOutput("hovered_info_table"),
+              downloadButton("download_info_table", "Download Table"),
+              br(),
+              br(),
+              br(),
               br(),
               br()
-              # DT::dataTableOutput("hovered_info_table")
             ),
             tabPanel(
               "Common OG's - More Information",
