@@ -11,6 +11,14 @@ library(shinyalert)
 
 # Function to clean gene names in orthogroups dataset to match species dataset
 clean_orthogroups_gene_names <- function(orthogroups, species_name, species_genes) {
+  if (species_name == "Arabidopsis") {
+    orthogroups <- orthogroups %>%
+      mutate(!!species_name := gsub("\\..*$", "", !!sym(species_name)))
+  }
+  if (species_name == "Zeamays") {
+    orthogroups <- orthogroups %>%
+      mutate(!!species_name := gsub("_.*$", "", !!sym(species_name)))
+  }
   if (species_name == "Catharanthus_roseus") {
     orthogroups <- orthogroups %>%
       mutate(!!species_name := paste0("gene-", !!sym(species_name)))
@@ -55,18 +63,18 @@ clean_orthogroups_gene_names <- function(orthogroups, species_name, species_gene
 }
 
 calculate_overlaps <- function(Species1, Species2, uploaded_species_name, ref_species_name) {
-  Species1 <- Species1 %>%
-    group_by(clusterName) %>%
-    arrange(desc(avg_log2FC)) %>%
-    slice_head(n = 200) %>%
-    ungroup()
+  # Species1 <- Species1 %>%
+  #   group_by(clusterName) %>%
+  #   arrange(desc(avg_log2FC)) %>%
+  #   slice_head(n = 200) %>%
+  #   ungroup()
 
-  # Filter top 200 OMGs based on avglog2FC within each cluster for Species2
-  Species2 <- Species2 %>%
-    group_by(clusterName) %>%
-    arrange(desc(avg_log2FC)) %>%
-    slice_head(n = 200) %>%
-    ungroup()
+  # # Filter top 200 OMGs based on avglog2FC within each cluster for Species2
+  # Species2 <- Species2 %>%
+  #   group_by(clusterName) %>%
+  #   arrange(desc(avg_log2FC)) %>%
+  #   slice_head(n = 200) %>%
+  #   ungroup()
 
   clusters_S1 <- unique(Species1$clusterName)
   clusters_S2 <- unique(Species2$clusterName)
@@ -139,8 +147,8 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   # After merging, check if the resulting dataframe is empty
   if (nrow(species1_data) == 0) {
     shinyalert::shinyalert(
-      title = "Data Merge Error",
-      text = "1. Make sure your CSV file name follows the same name from the reference dropdown and use the same species name from it. 2. Please make sure your uploaded data has the same columns as: gene, clusterName, avg_log2FC",
+      title = "Marker genes mismatch Error",
+      text = "Please make sure your uplaoded genes match the gene format of our reference genes from the referenc tab",
       type = "error"
     )
 
@@ -234,9 +242,47 @@ new_heatmap_server <- function(input, output, session) {
     uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
     selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
 
+    #validation step
+    # Generate a list of base species names from species_names
+    species_basename_list <- unique(sub("(__.*|_[0-9].*)$", "", species_names))
+    
+    # Check if uploaded species basename is in the list of base species names
+    if (!(uploaded_species_name %in% species_basename_list)) {
+      shinyalert::shinyalert(
+        title = "Species Name Error",
+        text = "The uploaded file's species name does not match any known species names in the reference dropdown, please rename the file as in dropdown like 'Arabidopsis, Brassica_rapa, Oryza, Zeamays ..('_'  and tissue type not necessay)'",
+        type = "error"
+      )
+      return(NULL)
+    }
+
     # Read the data files
     species1_data <- read.csv(input$file1$datapath)
+
+    # Check if file reading was successful and has required columns
+    required_columns <- c("gene", "clusterName", "avg_log2FC")
+    if (!all(required_columns %in% names(species1_data))) {
+      shinyalert::shinyalert(
+        title = "File Content Error",
+        text = "The uploaded data file is missing required columns: 'gene', 'clusterName', and 'avg_log2FC'. Please update the file and try again.",
+        type = "error"
+      )
+      return(NULL)
+    }
+
+    species1_data <- species1_data %>%
+    group_by(clusterName) %>%
+    arrange(desc(avg_log2FC)) %>%
+    slice_head(n = 200) %>%
+    ungroup()
+
     species2_data <- read.csv(file.path(species_data_path, paste0(input$species2, ".csv")))
+    species2_data <- species2_data %>%
+    group_by(clusterName) %>%
+    arrange(desc(avg_log2FC)) %>%
+    slice_head(n = 200) %>%
+    ungroup()
+    
     orthogroups <- read.delim("input_data/Orthogroups_091023_cleaned.tsv", header = TRUE, sep = "\t")
 
     # Create the heatmap and overlaps data
