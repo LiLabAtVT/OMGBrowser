@@ -161,6 +161,13 @@ ui <- fluidPage(
       )
     ),
     tabPanel(
+      title = "References",
+      icon = icon("book"),
+      fluidRow(
+        DT::dataTableOutput("references_table")
+      )
+    ),
+    tabPanel(
       title = "Download Sample Files",
       icon = icon("download"),
       fluidRow(

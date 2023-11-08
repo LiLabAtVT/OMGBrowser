@@ -1,7 +1,7 @@
 library(shiny)
 library(tidyverse)
 library(reshape2)
-library(openxlsx)
+library(readxl)
 library(shinyHeatmaply)
 library(plotly)
 library(RColorBrewer)
@@ -63,19 +63,6 @@ clean_orthogroups_gene_names <- function(orthogroups, species_name, species_gene
 }
 
 calculate_overlaps <- function(Species1, Species2, uploaded_species_name, ref_species_name) {
-  # Species1 <- Species1 %>%
-  #   group_by(clusterName) %>%
-  #   arrange(desc(avg_log2FC)) %>%
-  #   slice_head(n = 200) %>%
-  #   ungroup()
-
-  # # Filter top 200 OMGs based on avglog2FC within each cluster for Species2
-  # Species2 <- Species2 %>%
-  #   group_by(clusterName) %>%
-  #   arrange(desc(avg_log2FC)) %>%
-  #   slice_head(n = 200) %>%
-  #   ungroup()
-
   clusters_S1 <- unique(Species1$clusterName)
   clusters_S2 <- unique(Species2$clusterName)
 
@@ -242,10 +229,10 @@ new_heatmap_server <- function(input, output, session) {
     uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
     selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
 
-    #validation step
+    # validation step
     # Generate a list of base species names from species_names
     species_basename_list <- unique(sub("(__.*|_[0-9].*)$", "", species_names))
-    
+
     # Check if uploaded species basename is in the list of base species names
     if (!(uploaded_species_name %in% species_basename_list)) {
       shinyalert::shinyalert(
@@ -259,6 +246,18 @@ new_heatmap_server <- function(input, output, session) {
     # Read the data files
     species1_data <- read.csv(input$file1$datapath)
 
+    # Standardize the case of the column names
+    column_names_lower <- tolower(names(species1_data))
+
+    # Check if there's a 'cluster' column regardless of the case and rename it
+    if ("cluster" %in% column_names_lower) {
+      # Find the original name of the 'cluster' column (with original case)
+      original_cluster_name <- names(species1_data)[grepl("cluster", names(species1_data), ignore.case = TRUE)]
+
+      # Rename the 'cluster' column to 'clusterName'
+      names(species1_data)[names(species1_data) == original_cluster_name] <- "clusterName"
+    }
+
     # Check if file reading was successful and has required columns
     required_columns <- c("gene", "clusterName", "avg_log2FC")
     if (!all(required_columns %in% names(species1_data))) {
@@ -271,18 +270,18 @@ new_heatmap_server <- function(input, output, session) {
     }
 
     species1_data <- species1_data %>%
-    group_by(clusterName) %>%
-    arrange(desc(avg_log2FC)) %>%
-    slice_head(n = 200) %>%
-    ungroup()
+      group_by(clusterName) %>%
+      arrange(desc(avg_log2FC)) %>%
+      slice_head(n = 200) %>%
+      ungroup()
 
     species2_data <- read.csv(file.path(species_data_path, paste0(input$species2, ".csv")))
     species2_data <- species2_data %>%
-    group_by(clusterName) %>%
-    arrange(desc(avg_log2FC)) %>%
-    slice_head(n = 200) %>%
-    ungroup()
-    
+      group_by(clusterName) %>%
+      arrange(desc(avg_log2FC)) %>%
+      slice_head(n = 200) %>%
+      ungroup()
+
     orthogroups <- read.delim("input_data/Orthogroups_091023_cleaned.tsv", header = TRUE, sep = "\t")
 
     # Create the heatmap and overlaps data
@@ -468,7 +467,7 @@ new_heatmap_server <- function(input, output, session) {
 
   output$downloadButtons <- renderUI({
     # Get a list of files in the sample_data folder
-    files <- list.files(path = "sample_data", full.names = FALSE)
+    files <- list.files(path = "input_data/species_data", full.names = FALSE)
 
     # Create a download button for each file
     buttons <- lapply(files, function(file) {
@@ -480,7 +479,7 @@ new_heatmap_server <- function(input, output, session) {
 
   # Create a download handler for each file in the sample_data folder
   observe({
-    files <- list.files(path = "sample_data", full.names = FALSE)
+    files <- list.files(path = "input_data/species_data", full.names = FALSE)
 
     lapply(files, function(file) {
       outputId <- paste0("download_", gsub("\\.", "_", file))
@@ -496,24 +495,21 @@ new_heatmap_server <- function(input, output, session) {
     })
   })
 
-  # List of filenames under Dataset A and Dataset B
-  dataset_A_files <- c("Brassica_rapa_1(Leaf).csv", "species2_A.csv") # Add all filenames for Dataset A
-  dataset_B_files <- c("Catharanthus_roseus_1(Leaf).csv", "species4_B.csv") # Add all filenames for Dataset B
+  references_data <- readxl::read_excel("input_data/TableForReferenceScData_11072023.xlsx", sheet = "Sheet1")
 
   # Function to check the dataset for a given species file
   get_dataset_info <- function(species_file) {
-    if (species_file %in% dataset_A_files) {
-      dataset <- "Dataset A"
-      url <- "http://link_to_dataset_A.com"
-    } else if (species_file %in% dataset_B_files) {
-      dataset <- "Dataset B"
-      url <- "http://link_to_dataset_B.com"
+    # Find the row with the matching "Reference File Name"
+    matched_row <- references_data[references_data$`Reference File Name` == species_file, ]
+
+    # Extract the "Data Source" if there's a match
+    if (nrow(matched_row) > 0) {
+      data_source <- matched_row$`Data Source`
     } else {
-      dataset <- NULL
-      url <- NULL
+      data_source <- NULL
     }
 
-    list(dataset = dataset, url = url)
+    list(data_source = data_source)
   }
 
   # Inside server function
@@ -523,13 +519,23 @@ new_heatmap_server <- function(input, output, session) {
     species_file <- paste0(input$species2, ".csv")
     dataset_info <- get_dataset_info(species_file)
 
-    if (!is.null(dataset_info$dataset)) {
-      paste(
-        "Source:", dataset_info$dataset,
-        "Reference Database:", dataset_info$url
-      )
+    if (!is.null(dataset_info$data_source)) {
+      paste("DataSource:", dataset_info$data_source)
     } else {
-      "source not found for the selected species."
+      "Source not found for the selected species."
     }
+  })
+
+
+
+  output$references_table <- DT::renderDataTable({
+    # Read the Excel file. Adjust the path and sheet name as needed.
+    # Render the table with DT::datatable for the UI to display
+    DT::datatable(
+      references_data,
+      options = list(pageLength = 5, autoWidth = TRUE),
+      # Style as needed to match your app's theme
+      class = "cell-border stripe"
+    )
   })
 }
