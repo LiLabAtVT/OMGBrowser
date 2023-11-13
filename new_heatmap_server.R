@@ -544,3 +544,5 @@ new_heatmap_server <- function(input, output, session) {
     )
   })
 }
+
+# end of the code
