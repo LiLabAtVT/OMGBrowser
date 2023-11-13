@@ -200,11 +200,18 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
 # Server part for the heatmap
 new_heatmap_server <- function(input, output, session) {
   # Load species data dynamically
+  references_data <- readxl::read_excel("input_data/TableForReferenceScData_11072023.xlsx", sheet = "Sheet1")
   species_data_path <- "input_data/species_data"
   species_files <- list.files(species_data_path)
   species_names <- gsub("\\.csv$", "", species_files)
 
-  updateSelectInput(session, "species2", choices = species_names)
+  #updateSelectInput(session, "species2", choices = species_names)
+  reference_file_names <- unique(references_data$`Reference File Name`)
+  reference_file_names <- gsub("\\.csv$", "", reference_file_names)
+
+
+  # Now use the extracted file names to update the selectInput choices
+  updateSelectInput(session, "species2", choices = reference_file_names)
 
   placeholder_heatmap <- ggplot() +
     geom_tile(
@@ -495,14 +502,12 @@ new_heatmap_server <- function(input, output, session) {
     })
   })
 
-  references_data <- readxl::read_excel("input_data/TableForReferenceScData_11072023.xlsx", sheet = "Sheet1")
-
   # Function to check the dataset for a given species file
   get_dataset_info <- function(species_file) {
     # Find the row with the matching "Reference File Name"
     matched_row <- references_data[references_data$`Reference File Name` == species_file, ]
 
-    # Extract the "Data Source" if there's a match
+    # Extract the "Original Publication DOI" if there's a match
     if (nrow(matched_row) > 0) {
       data_source <- matched_row$`Original Publication DOI`
     } else {

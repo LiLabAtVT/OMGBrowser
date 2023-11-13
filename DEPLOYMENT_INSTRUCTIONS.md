@@ -28,6 +28,7 @@ Deploy your Shiny application using the `deployApp` function. Be sure to change 
 
 ```r
 # Replace <PATH_TO_YOUR_SHINY_APP> with the path to your Shiny application directory
+# NOTE: This should be the local path where you cloned the gitrepo
 rsconnect::deployApp('<PATH_TO_YOUR_SHINY_APP>')
 ```
 
