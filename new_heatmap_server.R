@@ -489,7 +489,7 @@ new_heatmap_server <- function(input, output, session) {
           file
         },
         content = function(fileContent) {
-          file.copy(paste0("sample_data/", file), fileContent)
+          file.copy(paste0("input_data/species_data/", file), fileContent)
         }
       )
     })
@@ -504,7 +504,7 @@ new_heatmap_server <- function(input, output, session) {
 
     # Extract the "Data Source" if there's a match
     if (nrow(matched_row) > 0) {
-      data_source <- matched_row$`Data Source`
+      data_source <- matched_row$`Original Publication DOI`
     } else {
       data_source <- NULL
     }
