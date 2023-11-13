@@ -5,6 +5,6 @@ account: omgbrowser
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 10505347
-bundleId: 7922318
+bundleId: 7922472
 url: https://orthomarkergenes.shinyapps.io/omgbrowser/
 version: 1
