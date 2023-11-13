@@ -525,7 +525,7 @@ new_heatmap_server <- function(input, output, session) {
     dataset_info <- get_dataset_info(species_file)
 
     if (!is.null(dataset_info$data_source)) {
-      paste("DataSource:", dataset_info$data_source)
+      paste( dataset_info$data_source, "\n")
     } else {
       "Source not found for the selected species."
     }
