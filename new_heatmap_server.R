@@ -244,7 +244,9 @@ new_heatmap_server <- function(input, output, session) {
     if (!(uploaded_species_name %in% species_basename_list)) {
       shinyalert::shinyalert(
         title = "Species Name Error",
-        text = "The uploaded file's species name does not match any known species names in the reference dropdown, please rename the file as in dropdown like 'Arabidopsis, Brassica_rapa, Oryza, Zeamays ..('_'  and tissue type not necessay)'",
+        text = paste0("The uploaded file's species name does not match any known species names in the reference dropdown,",
+        "please rename the file as in dropdown like 'Arabidopsis,",
+        "Brassica_rapa, Oryza, Zeamays ..('_'  and tissue type not necessay)'"),
         type = "error"
       )
       return(NULL)
@@ -530,8 +532,6 @@ new_heatmap_server <- function(input, output, session) {
       "Source not found for the selected species."
     }
   })
-
-
 
   output$references_table <- DT::renderDataTable({
     # Read the Excel file. Adjust the path and sheet name as needed.
