@@ -52,6 +52,7 @@ clean_orthogroups_gene_names <- function(orthogroups, species_name, species_gene
       mutate(!!species_name := gsub("_", "", !!sym(species_name)))
   }
   if (species_name == "Oryza") {
+    # userinput can be Os05g0111300, orthogroup id is Os05t0111300-01
     orthogroups <- orthogroups %>%
       mutate(!!species_name := gsub("t(\\d+)-.*$", "g\\1", !!sym(species_name)))
   }
@@ -134,8 +135,8 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   # After merging, check if the resulting dataframe is empty
   if (nrow(species1_data) == 0) {
     shinyalert::shinyalert(
-      title = "Marker genes mismatch Error",
-      text = "Please make sure your uplaoded genes match the gene format of our reference genes from the referenc tab",
+      title = "Incorrect Species / Marker genes mismatch Error",
+      text = "Please make sure you selected the right species and uplaoded genes match the gene format of our reference genes from the referenc tab",
       type = "error"
     )
 
@@ -200,18 +201,46 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
 # Server part for the heatmap
 new_heatmap_server <- function(input, output, session) {
   # Load species data dynamically
-  references_data <- readxl::read_excel("input_data/TableForReferenceScData_11072023.xlsx", sheet = "Sheet1")
-  species_data_path <- "input_data/species_data"
+  references_data <- readxl::read_excel("www/input_data/TableForReferenceScData_11072023.xlsx", sheet = "Sheet1")
+  species_data_path <- "www/input_data/species_data"
   species_files <- list.files(species_data_path)
   species_names <- gsub("\\.csv$", "", species_files)
 
   #updateSelectInput(session, "species2", choices = species_names)
-  reference_file_names <- unique(references_data$`Reference File Name`)
+  reference_file_names <- references_data %>%
+    filter(`Reference_Available` == "Yes") %>%
+    distinct(`Reference File Name`) %>%
+    pull(`Reference File Name`)
   reference_file_names <- gsub("\\.csv$", "", reference_file_names)
-
+  all_supported_species <- unique(references_data$`Species`)
 
   # Now use the extracted file names to update the selectInput choices
   updateSelectInput(session, "species2", choices = reference_file_names)
+  updateSelectInput(session, "selected_species1", choices = all_supported_species)
+
+  # Reactive expression to filter references_data based on selected species and extract Gene Pattern
+  selected_gene_pattern <- reactive({
+    req(input$selected_species1) # Require that a species has been selected
+    # Filter references_data for the selected species
+    filtered_data <- references_data[references_data$`Species` == input$selected_species1, ]
+    # Return the Gene Pattern value
+    if (nrow(filtered_data) > 0) {
+      return(filtered_data$`Gene Pattern`[1])
+    } else {
+      return(NA) # Return NA if the species is not found
+    }
+  })
+
+  # Output the Gene Pattern to the UI
+  output$gene_pattern_output <- renderText({
+    gene_pattern <- selected_gene_pattern() # Get the reactive value
+    if (is.na(gene_pattern)) {
+      return("Gene Pattern not found for the selected species.")
+    } else {
+      return(gene_pattern)
+    }
+  })
+
 
   placeholder_heatmap <- ggplot() +
     geom_tile(
@@ -232,25 +261,21 @@ new_heatmap_server <- function(input, output, session) {
       return(list(heatmap = placeholder_heatmap, overlaps = NULL)) # Changed this line
     }
 
-    # Extract the species names
-    uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
-    selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
-
-    # validation step
-    # Generate a list of base species names from species_names
-    species_basename_list <- unique(sub("(__.*|_[0-9].*)$", "", species_names))
-
-    # Check if uploaded species basename is in the list of base species names
-    if (!(uploaded_species_name %in% species_basename_list)) {
+    # Ensure the species selected is from the dropdown and the file is uploaded
+    if (is.null(input$selected_species1) || is.null(input$file1)) {
       shinyalert::shinyalert(
-        title = "Species Name Error",
-        text = paste0("The uploaded file's species name does not match any known species names in the reference dropdown,",
-        "please rename the file as in dropdown like 'Arabidopsis,",
-        "Brassica_rapa, Oryza, Zeamays ..('_'  and tissue type not necessay)'"),
+        title = "Missing Information",
+        text = "Please make sure you've uploaded a file and selected a species.",
         type = "error"
       )
       return(NULL)
     }
+
+    uploaded_species_name <- input$selected_species1
+  
+    # Extract the species names
+    #uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
+    selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
 
     # Read the data files
     species1_data <- read.csv(input$file1$datapath)
@@ -291,7 +316,7 @@ new_heatmap_server <- function(input, output, session) {
       slice_head(n = 200) %>%
       ungroup()
 
-    orthogroups <- read.delim("input_data/Orthogroups_091023_cleaned.tsv", header = TRUE, sep = "\t")
+    orthogroups <- read.delim("www/input_data/Orthogroups_091023_cleaned.tsv", header = TRUE, sep = "\t")
 
     # Create the heatmap and overlaps data
     create_heatmap_and_overlaps(species1_data, species2_data, orthogroups, uploaded_species_name, selected_species2_name)
@@ -304,6 +329,7 @@ new_heatmap_server <- function(input, output, session) {
     first_page = NULL
   )
 
+  #This will get trigerred
   observe({
     processed_data <- req(process_data())
     values$processed_data <- processed_data
@@ -476,7 +502,7 @@ new_heatmap_server <- function(input, output, session) {
 
   output$downloadButtons <- renderUI({
     # Get a list of files in the sample_data folder
-    files <- list.files(path = "input_data/species_data", full.names = FALSE)
+    files <- list.files(path = "www/sample_data", full.names = FALSE)
 
     # Create a download button for each file
     buttons <- lapply(files, function(file) {
@@ -488,7 +514,7 @@ new_heatmap_server <- function(input, output, session) {
 
   # Create a download handler for each file in the sample_data folder
   observe({
-    files <- list.files(path = "input_data/species_data", full.names = FALSE)
+    files <- list.files(path = "www/sample_data", full.names = FALSE)
 
     lapply(files, function(file) {
       outputId <- paste0("download_", gsub("\\.", "_", file))
@@ -498,7 +524,7 @@ new_heatmap_server <- function(input, output, session) {
           file
         },
         content = function(fileContent) {
-          file.copy(paste0("input_data/species_data/", file), fileContent)
+          file.copy(paste0("www/sample_data/", file), fileContent)
         }
       )
     })
@@ -534,15 +560,23 @@ new_heatmap_server <- function(input, output, session) {
   })
 
   output$references_table <- DT::renderDataTable({
-    # Read the Excel file. Adjust the path and sheet name as needed.
-    # Render the table with DT::datatable for the UI to display
-    DT::datatable(
-      references_data,
-      options = list(pageLength = 5, autoWidth = TRUE),
-      # Style as needed to match your app's theme
-      class = "cell-border stripe"
-    )
+
+  # Create a new 'Download' column with hyperlinks for each row
+  references_data$Download <- sapply(references_data$`Reference File Name`, function(filename) {
+    # Construct the download URL for each file
+    file_url <- paste0("input_data/species_data/",filename)
+    # Create a hyperlink HTML tag as a character string
+    as.character(shiny::a("Download", href = file_url, download = filename, target = "_blank"))
   })
+  
+  # Render the modified data frame as a DataTable
+  DT::datatable(
+    references_data,
+    escape = FALSE, # IMPORTANT: Prevent escaping HTML content
+    options = list(pageLength = 5, autoWidth = TRUE),
+    class = "cell-border stripe"
+  )
+}, server = FALSE) # IMPORTANT: server-side processing must be set to FALSE for escape=FALSE to work
 }
 
 # end of the code

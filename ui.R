@@ -115,6 +115,10 @@ ui <- fluidPage(
               ".csv"
             )
           ),
+          selectInput("selected_species1", "Select Uploaded Species", choices = NULL),
+          tags$strong("Gene Pattern:"), # This is the label for the dataset reference
+          textOutput("gene_pattern_output"),
+          br(),
           selectInput("species2", "Select Reference Species(Tissue)", ""),
           tags$strong("Dataset Reference:"), # This is the label for the dataset reference
           textOutput("dataset_info") # New UI element for dataset info
@@ -164,7 +168,10 @@ ui <- fluidPage(
       title = "References",
       icon = icon("book"),
       fluidRow(
-        DT::dataTableOutput("references_table")
+        DT::dataTableOutput("references_table"),
+        br(),
+        br(),
+        br()
       )
     ),
     tabPanel(
