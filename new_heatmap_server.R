@@ -579,4 +579,5 @@ new_heatmap_server <- function(input, output, session) {
 }, server = FALSE) # IMPORTANT: server-side processing must be set to FALSE for escape=FALSE to work
 }
 
+# testing from new mac
 # end of the code
