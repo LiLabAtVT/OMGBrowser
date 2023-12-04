@@ -86,7 +86,10 @@ ui <- fluidPage(
               tags$li(tags$a(href = "mailto:bspavan25@vt.edu", "bspavan25@vt.edu"))
             ),
             br(),
-            tags$a(href = "https://github.com/LiLabAtVT/OMGBrowser", "GitHub Repository", target = "_blank")
+            tags$a(href = "https://github.com/LiLabAtVT/OMGBrowser", "GitHub Repository", target = "_blank"),
+            br(),
+            br(),
+            hr()
           ),
           column(
             width = 6,
@@ -179,7 +182,12 @@ ui <- fluidPage(
       icon = icon("download"),
       fluidRow(
         uiOutput("downloadButtons")
-      )
+      ),
+      br(),
+      tags$p("For more information about how to prepare your input file, please follow the instruction on the github repository."),
+      
+      tags$a(href = "https://github.com/LiLabAtVT/OMGBrowser/blob/main/HowToPrepareYourFile.md", "How To Prepare Your Input Files", target = "_blank"),
+      br()
     )
   ),
   tags$div(
