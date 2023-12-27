@@ -7,106 +7,89 @@ library(plotly)
 library(RColorBrewer)
 library(DT)
 library(shinyalert)
-
+library(openxlsx)
 
 # Function to clean gene names in orthogroups dataset to match species dataset
-clean_orthogroups_gene_names <- function(orthogroups, species_name, species_genes) {
-  if (species_name == "Arabidopsis") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\..*$", "", !!sym(species_name)))
+clean_orthogroups_gene_names <- function(orthogroups, species_name) {
+  # Check if the species_name column exists in the orthogroups DataFrame
+  if (!species_name %in% colnames(orthogroups)) {
+    stop("Species name is not in the orthogroups table")
+  } else {
+    # Selecting the Orthogroup and species_name columns
+    orthogroups <- orthogroups[, c("Orthogroup", species_name)] %>%
+      mutate_at(vars(species_name), list(~strsplit(as.character(.), ","))) %>%
+      unnest(cols = species_name) %>%
+      mutate(across(where(is.character), str_trim)) %>% # Remove white spaces
+      dplyr:::distinct(!!sym(species_name), .keep_all = TRUE)
+    
+    return(orthogroups)
   }
-  if (species_name == "Zeamays") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("_.*$", "", !!sym(species_name)))
-  }
-  if (species_name == "Catharanthus_roseus") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := paste0("gene-", !!sym(species_name)))
-  }
-  if (species_name == "Fragaria_vesca") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\.1$", "", !!sym(species_name)))
-  }
-  if (species_name == "Gossypium_bickii") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\.[0-9]+$", "", !!sym(species_name)))
-  }
-  if (species_name == "Gossypium_hirsutum") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\.[0-9]+$", "", !!sym(species_name)))
-  }
-  if (species_name == "Populus_alba_x_populus_glandulosa") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\..*", "", !!sym(species_name)))
-  }
-  if (species_name == "Arabidopsis") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\..*", "", !!sym(species_name)))
-  }
-  if (species_name == "Solanum_lycopersicum") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("\\..*", "", !!sym(species_name)))
-  }
-  if (species_name == "MtrunA17r5") {
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("_", "", !!sym(species_name)))
-  }
-  if (species_name == "Oryza") {
-    # userinput can be Os05g0111300, orthogroup id is Os05t0111300-01
-    orthogroups <- orthogroups %>%
-      mutate(!!species_name := gsub("t(\\d+)-.*$", "g\\1", !!sym(species_name)))
-  }
-
-  orthogroups <- orthogroups %>%
-    filter(!!sym(species_name) %in% species_genes)
-
-  return(orthogroups)
 }
 
 calculate_overlaps <- function(Species1, Species2, uploaded_species_name, ref_species_name) {
   clusters_S1 <- unique(Species1$clusterName)
   clusters_S2 <- unique(Species2$clusterName)
 
-  overlaps <- data.frame(
-    species1_cluster = character(0),
-    species1_no_of_OMGs = integer(0),
-    species2_cluster = character(0),
-    species2_no_of_OMGs = integer(0),
-    common_OMGs = integer(0),
-    stringsAsFactors = FALSE
-  )
-
-  for (i in clusters_S1) {
-    species1_no_of_OMGs <- nrow(Species1[Species1$clusterName == i, ])
-
-    for (j in clusters_S2) {
-      species2_no_of_OMGs <- nrow(Species2[Species2$clusterName == j, ])
-
-      common_OMGs <- length(intersect(
-        Species1[Species1$clusterName == i, ]$Orthogroup,
-        Species2[Species2$clusterName == j, ]$Orthogroup
-      ))
-
-      overlaps <- rbind(overlaps, data.frame(
-        species1_cluster = i,
-        species1_no_of_OMGs = species1_no_of_OMGs,
-        species2_cluster = j,
-        species2_no_of_OMGs = species2_no_of_OMGs,
-        common_OMGs = common_OMGs,
-        stringsAsFactors = FALSE
-      ))
+  two_plants <- matrix(nrow=length(clusters_S1), ncol=length(clusters_S2))
+  for(i in 1:length(clusters_S1)){
+    for(j in 1:length(clusters_S2)){
+      list_overlap = intersect(Species1[Species1$clusterName == clusters_S1[i],]$Orthogroup, Species2[Species2$clusterName == clusters_S2[j],]$Orthogroup)
+      num_overlap = length(list_overlap)
+      
+      two_plants[i,j] = num_overlap
     }
   }
+  rownames(two_plants) = unique(Species1$clusterName)
+  colnames(two_plants) = unique(Species2$clusterName) 
+  df = two_plants[order(rownames(two_plants)), order(colnames(two_plants))]
+  df = as.data.frame(df)
+  table_count = as.matrix(df)
+  df$cell_type <- rownames(df) # Add column to make 2 variables when using melt function
+  print(df)
+  # Add a row that sums up the values in all other rows
+  library(tidyverse)
+  sumrow = df %>% dplyr:::select(-cell_type) %>% colSums() # sum all numeric row in the dataframe
+  sum_h = c(sumrow, "sum_h") 
+  df = rbind(df, sum_h) # After merging two data frames, datatype in dataframe will be changed into character
+  
+  library(hablar)
+  df = df %>% retype()  # This library and function retype will change the data into the correct type
+  
+  # Add a column to sum up all values in other columns
+  df$sum_v = df %>% dplyr:::select(-cell_type) %>% rowSums() # sum all numeric columns in the dataframe
+  rownames(df) <- df$cell_type  
+  
+  
+  p_value_dataframe = df[1: (nrow(df) - 1), 1: (ncol(df) -2)]
 
-  colnames(overlaps) <- c(
-    paste0(uploaded_species_name, "_cluster - Query Cluster"),
-    paste0(uploaded_species_name, "_no_of_OMGs_Q"),
-    paste0(ref_species_name, "_cluster - Ref Cluster"),
-    paste0(ref_species_name, "_no_of_OMGs_R"),
-    "common_OMGs"
-  )
+  
+  conclusionTable_0.01 = p_value_dataframe # Reject the null hypothesis if p-value < 0.05
 
-  return(overlaps)
+  for (i in rownames(p_value_dataframe)){
+    for (j in colnames(p_value_dataframe)){
+      frame = df[c(i, "sum_h"), c(j, "sum_v")]
+      frame[2,2] = frame[2,2] - frame[1,2] - frame[2,1] + frame[1,1]
+      frame[1,2] = frame[1,2] - frame[1,1]
+      frame[2,1] = frame[2,1] - frame[1,1]
+      p_value_dataframe[i,j] = fisher.test(frame, alternative = "greater")$p.value
+    }
+  }
+  
+  
+  adjusted_pvalue_dataframe <- p_value_dataframe
+  adjusted_pvalue_dataframe[] = p.adjust(unlist(p_value_dataframe), method = "BH")
+  conclusionTable_0.01 = ifelse(adjusted_pvalue_dataframe < 0.01, "Reject", "Fail")
+  
+  #-----
+  df1 = melt(table_count)
+  df1$p_value = melt(adjusted_pvalue_dataframe)$value
+  df1$negative_log = -log10(df1$p_value)
+  df1$transform = ifelse(df1$negative_log > 10, 10, ifelse(df1$negative_log > 3, 3, ifelse(df1$negative_log > 2, 2, ifelse(df1$negative_log > 1.3, 1.3, 0))))
+  df1$test = melt(conclusionTable_0.01)$value
+  colnames(df1) <- c("Query_clusters", "Reference_clusters", "common_OMGs", "p_value", "negative_log", "transform","test")
+  print(df1)
+  return(df1)
+  
 }
 
 create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroups, species1_name, species2_name) {
@@ -114,12 +97,13 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   tryCatch(
     {
       # Clean orthogroups gene names for each species
-      orthogroups_species1 <- clean_orthogroups_gene_names(orthogroups, species1_name, species1_data$gene)
-      orthogroups_species2 <- clean_orthogroups_gene_names(orthogroups, species2_name, species2_data$gene)
+      orthogroups_species1 <- clean_orthogroups_gene_names(orthogroups, species1_name)
+      orthogroups_species2 <- clean_orthogroups_gene_names(orthogroups, species2_name)
 
       # Merge with orthogroups
-      species1_data <- merge(species1_data, orthogroups_species1, by.x = "gene", by.y = species1_name)
-      species2_data <- merge(species2_data, orthogroups_species2, by.x = "gene", by.y = species2_name)
+      species1_data <- merge(species1_data, orthogroups_species1, by.x = "gene", by.y = species1_name) %>% arrange(clusterName, desc(avg_log2FC)) %>% dplyr:::select("gene", "Orthogroup", "clusterName", "avg_log2FC") %>% group_by(clusterName) %>% top_n(200)
+      species2_data <- merge(species2_data, orthogroups_species2, by.x = "gene", by.y = species2_name) %>% arrange(clusterName, desc(avg_log2FC)) %>% dplyr:::select("gene", "Orthogroup", "clusterName", "avg_log2FC") %>% group_by(clusterName) %>% top_n(200)
+
     },
     error = function(e) {
       # If there's an error, show an alert
@@ -136,7 +120,7 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   if (nrow(species1_data) == 0) {
     shinyalert::shinyalert(
       title = "Incorrect Species / Marker genes mismatch Error",
-      text = "Please make sure you selected the right species and uplaoded genes match the gene format of our reference genes from the referenc tab",
+      text = "Please make sure you selected the right species and uploaded genes match the gene format of our reference genes from the referenc tab",
       type = "error"
     )
 
@@ -152,7 +136,7 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   cluster_columns <- all_columns[!all_columns %in% c("common_OMGs")]
 
   query_col_name <- cluster_columns[1]
-  ref_col_name <- cluster_columns[3]
+  ref_col_name <- cluster_columns[2]
 
   # Pivot to matrix format
   overlaps_matrix <- dcast(overlaps,
@@ -162,7 +146,7 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
   )
 
   # Ordering rows consistently
-  overlaps_matrix <- overlaps_matrix[order(overlaps_matrix[[1]]), ]
+  # overlaps_matrix <- overlaps_matrix[order(overlaps_matrix[[1]]), ]
 
   # Remove row names for heatmaply
   rownames(overlaps_matrix) <- overlaps_matrix[[1]]
@@ -175,16 +159,49 @@ create_heatmap_and_overlaps <- function(species1_data, species2_data, orthogroup
       "Common OMGs: ", z
     )
   }
-
-  heatmap <- heatmaply(overlaps_matrix,
+  ##########################
+  # Matrix of Annotation
+  pvalues_matrix <- dcast(overlaps,
+                           overlaps[[query_col_name]] ~ overlaps[[ref_col_name]],
+                           value.var = "p_value",
+                           fill = 0
+  )
+  rownames(pvalues_matrix) <- pvalues_matrix[[1]]
+  pvalues_matrix <- pvalues_matrix[, -1]
+  
+  annotated_overlaps_matrix = overlaps_matrix
+  for (row in 1:nrow(overlaps_matrix)) {
+    for (col in 1:ncol(overlaps_matrix)) {
+      if (pvalues_matrix[row, col] < 0.001) {
+        annotated_overlaps_matrix[row, col] <- paste0(as.character(overlaps_matrix[row, col]), "**")
+      } else if (pvalues_matrix[row, col] < 0.01) {
+        annotated_overlaps_matrix[row, col] <- paste0(as.character(overlaps_matrix[row, col]), "*")
+      } 
+    }
+  }
+  print(annotated_overlaps_matrix)
+  ##########################
+  # Matrix of color
+  color_matrix <- dcast(overlaps,
+                          overlaps[[query_col_name]] ~ overlaps[[ref_col_name]],
+                          value.var = "transform",
+                          fill = 0
+  )
+  rownames(color_matrix) <- color_matrix[[1]]
+  color_matrix <- color_matrix[, -1]
+  print(color_matrix)
+  ##########################
+  
+  heatmap <- heatmaply(
+    color_matrix,
     showticklabels = c(TRUE, TRUE),
     show_row_dendrogram = FALSE,
     show_col_dendrogram = FALSE,
-    cellnote = overlaps_matrix,
+    cellnote = annotated_overlaps_matrix,  # Display the overlap values in the cells
     main = " ",
-    xlab = paste0(species2_name, " - Reference Cluster"),
-    ylab = paste0(species1_name, " - Query Cluster"),
-    colors = colorRampPalette(brewer.pal(9, "Greens"))(256),
+    xlab = paste0("Reference: ", species2_name),
+    ylab = paste0("Query: ", species1_name),
+    colors = colorRampPalette(brewer.pal(9, "Blues"))(256),
     custom_hoverinfo = custom_hover,
     dendrogram = "none"
   )
@@ -274,7 +291,6 @@ new_heatmap_server <- function(input, output, session) {
     uploaded_species_name <- input$selected_species1
   
     # Extract the species names
-    #uploaded_species_name <- sub("(__.*|_[0-9].*)$", "", tools::file_path_sans_ext(basename(input$file1$name)))
     selected_species2_name <- sub("(__.*|_[0-9].*)$", "", input$species2)
 
     # Read the data files
@@ -303,20 +319,9 @@ new_heatmap_server <- function(input, output, session) {
       return(NULL)
     }
 
-    species1_data <- species1_data %>%
-      group_by(clusterName) %>%
-      arrange(desc(avg_log2FC)) %>%
-      slice_head(n = 200) %>%
-      ungroup()
-
     species2_data <- read.csv(file.path(species_data_path, paste0(input$species2, ".csv")))
-    species2_data <- species2_data %>%
-      group_by(clusterName) %>%
-      arrange(desc(avg_log2FC)) %>%
-      slice_head(n = 200) %>%
-      ungroup()
-
-    orthogroups <- read.delim("www/input_data/Orthogroups_091023_cleaned.tsv", header = TRUE, sep = "\t")
+    
+    orthogroups <- read.delim("www/input_data/Orthogroups_website.tsv", header = TRUE, sep = "\t")
 
     # Create the heatmap and overlaps data
     create_heatmap_and_overlaps(species1_data, species2_data, orthogroups, uploaded_species_name, selected_species2_name)
@@ -338,7 +343,7 @@ new_heatmap_server <- function(input, output, session) {
   output$new_heatmap_plot <- renderPlotly({
     req(values$processed_data)
     p <- values$processed_data$heatmap
-
+    event_register(p, 'plotly_click')
     # Assign a source to the plot
     p$x$source <- "newHeatmapSource"
 
@@ -387,7 +392,7 @@ new_heatmap_server <- function(input, output, session) {
     # Assuming 'values$processed_data$overlaps' is your data frame and columns at index 1 and 3 need to be converted to character
 
     values$processed_data$overlaps[, 1] <- as.character(values$processed_data$overlaps[, 1])
-    values$processed_data$overlaps[, 3] <- as.character(values$processed_data$overlaps[, 3])
+    values$processed_data$overlaps[, 2] <- as.character(values$processed_data$overlaps[, 2])
 
     # Now your columns are explicitly character strings, which should prevent the DataTables error
 
@@ -420,7 +425,7 @@ new_heatmap_server <- function(input, output, session) {
           "});",
           "$('<input type=\"text\" placeholder=\"Reference Cluster\" id=\"col3-filter\" style=\"margin-right: 10px;\">').appendTo('#customFilters').on('keyup', function() {",
           "var table = settings.oInstance.api();",
-          "table.columns(2).search(this.value).draw();",
+          "table.columns(1).search(this.value).draw();",
           "});",
           "}"
         )
@@ -442,9 +447,10 @@ new_heatmap_server <- function(input, output, session) {
   observeEvent(input$comparison_table_rows_selected, {
     selected_row <- req(values$processed_data$overlaps[input$comparison_table_rows_selected, ])
     species1_data <- req(values$processed_data$species1_data)
+
     species2_data <- req(values$processed_data$species2_data)
 
-    common_genes_data <- populate_new_table(as.character(selected_row[1]), as.character(selected_row[3]), species1_data, species2_data)
+    common_genes_data <- populate_new_table(as.character(selected_row[1]), as.character(selected_row[2]), species1_data, species2_data)
     values$common_genes_data <- common_genes_data
 
     output$new_table <- DT::renderDataTable({
@@ -468,14 +474,18 @@ new_heatmap_server <- function(input, output, session) {
     # Extract the selected row's information
     # uploaded_species_cluster <- as.character(selected_row[1])
     # ref_cluster <- as.character(selected_row[3])
-
+    
     # Filter the data from Species1 and Species2 based on the selected clusters
-    species1_data <- Species1[as.character(Species1$cluster) == uploaded_species_cluster, ]
-    species2_data <- Species2[as.character(Species2$cluster) == ref_cluster, ]
-
+    species1_data <- Species1[as.character(Species1$clusterName) == uploaded_species_cluster, ]
+    species1_data$Species = "Query"
+    species1_data$clusterName <- as.character(species1_data$clusterName)
+    
+    species2_data <- Species2[as.character(Species2$clusterName) == ref_cluster, ]
+    species2_data$Species = "Reference"
+    
     # Find the common OGs between the two species
     common_OGs <- intersect(species1_data$Orthogroup, species2_data$Orthogroup)
-
+    
     # Check if there are no common OGs
     if (length(common_OGs) == 0) {
       return(data.frame()) # Return an empty data frame
@@ -483,20 +493,13 @@ new_heatmap_server <- function(input, output, session) {
 
     # Filter the genes associated with the common OGs, select the one with highest avg_log2FC, and drop the avg_log2FC column
     species1_genes <- species1_data %>%
-      filter(Orthogroup %in% common_OGs) %>%
-      arrange(desc(avg_log2FC)) %>%
-      distinct(Orthogroup, .keep_all = TRUE)
+      filter(Orthogroup %in% common_OGs) 
 
     species2_genes <- species2_data %>%
-      filter(Orthogroup %in% common_OGs) %>%
-      arrange(desc(avg_log2FC)) %>%
-      distinct(Orthogroup, .keep_all = TRUE)
+      filter(Orthogroup %in% common_OGs) 
 
     # Merge the genes from both species and select certain columns from .x and .y
-    common_genes <- merge(species1_genes, species2_genes, by = "Orthogroup") %>%
-      arrange(desc(avg_log2FC.x)) %>%
-      select(Orthogroup, clusterName.x, gene.x, avg_log2FC.x, clusterName.y, gene.y, avg_log2FC.y) # Add or remove the columns you want here
-
+    common_genes <- rbind(species1_genes, species2_genes)
     return(common_genes)
   }
 
