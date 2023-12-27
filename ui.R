@@ -111,20 +111,21 @@ ui <- fluidPage(
       sidebarLayout(
         sidebarPanel(
           width = 3,
-          fileInput("file1", "Upload CSV File - Query Species",
-            accept = c(
-              "text/csv",
-              "text/comma-separated-values,text/plain",
-              ".csv"
-            )
-          ),
           selectInput("selected_species1", "Select Uploaded Species", choices = NULL),
           tags$strong("Gene Pattern:"), # This is the label for the dataset reference
           textOutput("gene_pattern_output"),
           br(),
           selectInput("species2", "Select Reference Species(Tissue)", ""),
           tags$strong("Dataset Reference:"), # This is the label for the dataset reference
-          textOutput("dataset_info") # New UI element for dataset info
+          textOutput("dataset_info"), # New UI element for dataset info
+          br(),
+          fileInput("file1", "Upload CSV File - Query Species",
+                    accept = c(
+                      "text/csv",
+                      "text/comma-separated-values,text/plain",
+                      ".csv"
+                    )
+          )
         ),
         mainPanel(
           tabsetPanel(
